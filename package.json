@@ -11,6 +11,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@supabase/supabase-js": "^2.49.4",
     "@types/express-session": "^1.18.1",
     "@types/passport": "^1.0.17",
     "@types/passport-google-oauth20": "^2.0.16",
@@ -26,6 +27,7 @@
     "node-fetch": "^3.3.2",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
+    "postgres": "^3.4.5",
     "rollup": "^4.36.0",
     "zod": "^3.24.2"
   },
