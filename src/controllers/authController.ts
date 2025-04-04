@@ -4,32 +4,14 @@ import bcrypt, { compareSync } from "bcryptjs";
 import { generateJWToken, verifyToken } from '../utils/jwt';
 import { redis } from '../config/redis';
 import { Session } from '../types/token';
+import { encryptKey } from '../utils/encrypt';
 
 export const userRegister = async (req: Request, res: Response): Promise<any> => {
     try {
-        // get and checking role value
-        const role = req.query.role;
-
-        if (!role) {
-            return res.status(400).json({ 
-                error: 'Params is missing'
-            });
-        }
-
-        if (role !== 'business' && role !== 'personal') {
-            return res.status(400).json({
-                error: 'Params incorrect'
-            })
-        }
 
         // get and checking req.body value
         const { name, company_name, email, password } = req.body;
-
-        if (role === 'business' && !company_name) {
-            return res.status(400).json({
-                error: 'Input parameter is missing'
-            })
-        }
+        const role = "member";
 
         if (!name || !email || !password) {
             return res.status(400).json({
@@ -44,7 +26,7 @@ export const userRegister = async (req: Request, res: Response): Promise<any> =>
         const data = await sql`
             INSERT INTO users (name, company_name, email, password, role)
             VALUES (${name}, ${company_name}, ${email}, ${hashPassword}, ${role})
-            RETURNING name, company_name, email, password
+            RETURNING id, name, company_name, email, role
         `
 
         // token generation
@@ -56,6 +38,9 @@ export const userRegister = async (req: Request, res: Response): Promise<any> =>
             role: data[0].role
         }
 
+        // encrypt email for redis key
+        const encryptMail = await encryptKey(email);
+
         const token = generateJWToken(userData);
 
         if (typeof token === "object" && ("errorCode" in token) && (token.errorCode === "13" || token.errorCode === "14")) {
@@ -66,7 +51,7 @@ export const userRegister = async (req: Request, res: Response): Promise<any> =>
         }
 
         res.setHeader('Authorization', `Bearer ${token}`);
-        await redis.set(`user_session:${userData.id}`, { token: token }, { ex: 86400 });
+        await redis.set(`user_session:${encryptMail}`, { token: token }, { ex: 86400 });
 
         // return result
         return res.status(201).json({
@@ -82,21 +67,8 @@ export const userRegister = async (req: Request, res: Response): Promise<any> =>
 
 export const userLogin = async (req: Request, res: Response): Promise<any> => {
     try {
-        // get and check role and req.body value
-        const role = req.query.role;
+        // get and check req.body value
         const { email, password } = req.body;
-    
-        if (!role) {
-            return res.status(400).json({ 
-                error: 'Params is missing!'
-            });
-        }
-    
-        if (role !== 'business' && role !== 'personal') {
-            return res.status(400).json({
-                error: 'Params incorrect!'
-            })
-        }
 
         if (!email || !password) {
             return res.status(400).json({
@@ -104,51 +76,48 @@ export const userLogin = async (req: Request, res: Response): Promise<any> => {
             })
         }
 
-        // get user data from database
-        const user = await sql`
-            SELECT id, name, company_name, email, role, password
-            FROM users
-            WHERE email = ${email} 
-            AND deleted_at IS NULL
-        `
-
-        if (!user) {
-            return res.status(404).json({
-                error: 'User not found!'
-            })
-        }
-
-        // compare password
-        const userData = {
-            id: user[0].id,
-            name: user[0].name,
-            company_name: user[0].company_name,
-            email: user[0].email,
-            role: user[0].role
-        }
-
-        const isMatch = await bcrypt.compare(password, user[0]?.password)
-
-        if (!isMatch) {
-            return res.status(400).json({
-                error: 'Invalid credentials!'
-            })
-        }
-
-        if (user[0].role !== role) {
-            return res.status(403).json({
-                error: 'You are not authorized to access this page!'
-            })
-        }
+        // encrypt email for redis key
+        const encryptMail = await encryptKey(email);
 
         // check session on redis
-        const session = await redis.get<Session>(`user_session:${userData.id}`);
+        const session = await redis.get<Session>(`user_session:${encryptMail}`);
         let token;
 
         if (!session) {
+            // get user data from database
+            const user = await sql`
+                SELECT id, name, company_name, email, role, password
+                FROM users
+                WHERE email = ${email} 
+                AND deleted_at IS NULL
+            `
+
+            if (!user) {
+                return res.status(404).json({
+                    error: 'User not found!'
+                })
+            }
+
+            // compare password
+            const userData = {
+                id: user[0].id,
+                name: user[0].name,
+                company_name: user[0].company_name,
+                email: user[0].email,
+                role: user[0].role
+            }
+
+            const isMatch = await bcrypt.compare(password, user[0]?.password)
+
+            if (!isMatch) {
+                return res.status(400).json({
+                    error: 'Invalid credentials!'
+                })
+            }
+
             // token generation
             const generateToken = generateJWToken(userData);
-            await redis.set(`user_session:${userData.id}`, { token: generateToken }, { ex: 86400 });
+            await redis.set(`user_session:${encryptMail}`, { token: generateToken }, { ex: 86400 });
 
             if (typeof generateToken === "object" && ("errorCode" in generateToken) && (generateToken.errorCode === "13" || generateToken.errorCode === "14")) {
                 return res.status(400).json({
@@ -161,6 +130,8 @@ export const userLogin = async (req: Request, res: Response): Promise<any> => {
         } else {
             token = session.token;
         }
+
+       
         res.setHeader('Authorization', `Bearer ${token}`);
 
         // return result

@@ -4,7 +4,7 @@ export interface User {
     company_name: string | null,
     email: string;
     password: string;
-    role: "business" | "personal";
+    role: "admin" | "member";
 }
 
 export interface UserPayload {
@@ -19,7 +19,7 @@ declare module "express" {
       xata_id: string;
       name: string;
       email: string;
-      role: "business" | "personal";
+      role: "admin" | "member";
       company_name?: string | null;
     }
   }
