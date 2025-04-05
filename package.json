@@ -7,7 +7,7 @@
     "dev": "nodemon ./src/server.ts",
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node dist/server.js",
-    "build": "tsc"
+    "build": "tsc && npm install"
   },
   "keywords": [],
   "author": "",
