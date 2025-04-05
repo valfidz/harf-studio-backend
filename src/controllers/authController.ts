@@ -33,7 +33,7 @@ export const userRegister = async (req: Request, res: Response): Promise<any> =>
           error: "Input parameter is missing",
         });
       }
-    
+
       const passwordError = validatePassword(password);
       if (passwordError) {
         return res.status(400).json({
@@ -59,7 +59,7 @@ export const userRegister = async (req: Request, res: Response): Promise<any> =>
       company_name: data[0].company_name,
       email: data[0].email,
       role: data[0].role,
-      method: data[0].method
+      method: data[0].method,
     };
 
     // encrypt email for redis key
@@ -272,4 +272,25 @@ export const userLogout = (req: Request, res: Response) => {
   });
 
   res.json({ message: "Logged out successfully!" });
+};
+
+export const isEmailAvailable = async (req: Request, res: Response): Promise<any> => {
+  const { email } = req.body;
+
+  const user = await sql`
+    SELECT email
+    FROM users
+    WHERE email=${email}
+    AND deleted_at IS NULL
+  `;
+
+  if (user.length !== 0) {
+    return res.status(200).json({
+      message: "Email not available",
+    });
+  }
+
+  return res.status(200).json({
+    message: "Email available",
+  });
 };
