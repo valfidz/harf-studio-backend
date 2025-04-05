@@ -6,17 +6,40 @@ import { redis } from "../config/redis";
 import { Session } from "../types/token";
 import { encryptKey } from "../utils/encrypt";
 import jwt from "jsonwebtoken";
+import { validatePassword } from "../helpers/validation";
 
 export const userRegister = async (req: Request, res: Response): Promise<any> => {
   try {
     // get and checking req.body value
     const { name, company_name, email, password } = req.body;
     const role = "member";
+    const method = req.query.method ? req.query.method : "";
 
-    if (!name || !email || !password) {
+    if (method != "oauth" && method != "standard") {
       return res.status(400).json({
-        error: "Input parameter is missing",
+        error: "Registration method invalid!",
       });
+    }
+
+    if (method === "oauth") {
+      if (!name || !email) {
+        return res.status(400).json({
+          error: "Input parameter is missing!",
+        });
+      }
+    } else if (method === "standard") {
+      if (!name || !email || !password) {
+        return res.status(400).json({
+          error: "Input parameter is missing",
+        });
+      }
+    
+      const passwordError = validatePassword(password);
+      if (passwordError) {
+        return res.status(400).json({
+          error: passwordError,
+        });
+      }
     }
 
     // create hash password
@@ -24,9 +47,9 @@ export const userRegister = async (req: Request, res: Response): Promise<any> =>
     const hashPassword = bcrypt.hashSync(password, salt);
 
     const data = await sql`
-            INSERT INTO users (name, company_name, email, password, role)
-            VALUES (${name}, ${company_name}, ${email}, ${hashPassword}, ${role})
-            RETURNING id, name, company_name, email, role
+            INSERT INTO users (name, company_name, email, password, role, method)
+            VALUES (${name}, ${company_name}, ${email}, ${hashPassword}, ${role}, ${method})
+            RETURNING id, name, company_name, email, role, method
         `;
 
     // token generation
@@ -36,6 +59,7 @@ export const userRegister = async (req: Request, res: Response): Promise<any> =>
       company_name: data[0].company_name,
       email: data[0].email,
       role: data[0].role,
+      method: data[0].method
     };
 
     // encrypt email for redis key
