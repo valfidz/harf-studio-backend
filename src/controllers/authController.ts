@@ -46,6 +46,20 @@ export const userRegister = async (req: Request, res: Response): Promise<any> =>
     const salt = bcrypt.genSaltSync(10);
     const hashPassword = bcrypt.hashSync(password, salt);
 
+    // check user data from database
+    const user = await sql`
+        SELECT id, email
+        FROM users
+        WHERE email = ${email} 
+        AND deleted_at IS NULL
+    `;
+
+    if (user.length !== 0) {
+      return res.status(409).json({
+      error: "User already registered!",
+      });
+    }
+
     const data = await sql`
             INSERT INTO users (name, company_name, email, password, role, method)
             VALUES (${name}, ${company_name}, ${email}, ${hashPassword}, ${role}, ${method})
@@ -110,13 +124,16 @@ export const userLogin = async (req: Request, res: Response): Promise<any> => {
     // check session on redis
     const session = await redis.get<Session>(`user_session:${encryptMail}`);
     let token;
-    let userData: {
-      id: string;
-      name: string;
-      company_name: string;
-      email: string;
-      role: string;
-    } | null = null;
+    // let userData: {
+    //   id: string;
+    //   name: string;
+    //   company_name: string;
+    //   email: string;
+    //   role: string;
+    //   method: string;
+    // } | null = null;
+
+    let userData;
 
     if (!session) {
       // get user data from database
@@ -140,6 +157,7 @@ export const userLogin = async (req: Request, res: Response): Promise<any> => {
         company_name: user[0].company_name,
         email: user[0].email,
         role: user[0].role,
+        method: user[0].method
       };
 
       const isMatch = await bcrypt.compare(password, user[0]?.password);
@@ -169,27 +187,29 @@ export const userLogin = async (req: Request, res: Response): Promise<any> => {
     } else {
       token = session.token;
 
-      // Ambil userData dari database jika sesi sudah ada
-      const user = await sql`
-                  SELECT id, name, company_name, email, role
-                  FROM users
-                  WHERE email = ${email} 
-                  AND deleted_at IS NULL
-              `;
+      if (!token) {
+        return res.status(500).json({
+          error: "Token invalid"
+        })
+      }
 
-      if (user.length === 0) {
-        return res.status(404).json({
-          error: "User not found!",
+      const validate = verifyToken(token);
+
+      if (!validate.valid) {
+        return res.status(500).json({
+          valid: validate.valid,
+          error: validate.error,
         });
       }
 
       userData = {
-        id: user[0].id,
-        name: user[0].name,
-        company_name: user[0].company_name,
-        email: user[0].email,
-        role: user[0].role,
-      };
+        id: validate.decoded?.id,
+        name: validate.decoded?.name,
+        company_name: validate.decoded?.company_name,
+        email: validate.decoded?.email,
+        role: validate.decoded?.role,
+        method: validate.decoded?.method
+      }
     }
 
     res.cookie("token", token, {

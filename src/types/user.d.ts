@@ -8,10 +8,12 @@ export interface User {
 }
 
 export interface UserPayload {
+    id: string;
     name: string;
     company_name?: string | null; // Optional field
     email: string;
     role: string;
+    method: string;
 }
 
 declare module "express" {
