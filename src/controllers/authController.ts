@@ -110,24 +110,31 @@ export const userLogin = async (req: Request, res: Response): Promise<any> => {
     // check session on redis
     const session = await redis.get<Session>(`user_session:${encryptMail}`);
     let token;
+    let userData: {
+      id: string;
+      name: string;
+      company_name: string;
+      email: string;
+      role: string;
+    } | null = null;
 
     if (!session) {
       // get user data from database
       const user = await sql`
-                SELECT id, name, company_name, email, role, password
-                FROM users
-                WHERE email = ${email} 
-                AND deleted_at IS NULL
-            `;
+                  SELECT id, name, company_name, email, role, password
+                  FROM users
+                  WHERE email = ${email} 
+                  AND deleted_at IS NULL
+              `;
 
-      if (!user) {
+      if (user.length === 0) {
         return res.status(404).json({
           error: "User not found!",
         });
       }
 
       // compare password
-      const userData = {
+      userData = {
         id: user[0].id,
         name: user[0].name,
         company_name: user[0].company_name,
@@ -161,6 +168,28 @@ export const userLogin = async (req: Request, res: Response): Promise<any> => {
       token = generateToken;
     } else {
       token = session.token;
+
+      // Ambil userData dari database jika sesi sudah ada
+      const user = await sql`
+                  SELECT id, name, company_name, email, role
+                  FROM users
+                  WHERE email = ${email} 
+                  AND deleted_at IS NULL
+              `;
+
+      if (user.length === 0) {
+        return res.status(404).json({
+          error: "User not found!",
+        });
+      }
+
+      userData = {
+        id: user[0].id,
+        name: user[0].name,
+        company_name: user[0].company_name,
+        email: user[0].email,
+        role: user[0].role,
+      };
     }
 
     res.cookie("token", token, {
@@ -176,6 +205,7 @@ export const userLogin = async (req: Request, res: Response): Promise<any> => {
     return res.status(200).json({
       message: "Login successful!",
       token,
+      data: userData,
     });
   } catch (error: any) {
     return res.status(500).json({
@@ -232,4 +262,14 @@ export const verifyTokenCookies = async (req: Request, res: Response): Promise<a
     }
     res.status(403).json({ message: "Invalid token" });
   }
+};
+
+export const userLogout = (req: Request, res: Response) => {
+  res.clearCookie("token", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+  });
+
+  res.json({ message: "Logged out successfully!" });
 };

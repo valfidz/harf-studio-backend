@@ -4,6 +4,7 @@ import {
   userLogin,
   authVerify,
   verifyTokenCookies,
+  userLogout,
 } from "../controllers/authController";
 import { validate } from "../utils/zod";
 import { registerSchema, loginSchema } from "../helpers/validation";
@@ -14,5 +15,6 @@ authRouter.post("/register", validate(registerSchema), userRegister);
 authRouter.post("/login", validate(loginSchema), userLogin);
 authRouter.get("/verifyTokenCookies", verifyTokenCookies);
 authRouter.post("/verify", authVerify);
+authRouter.post("/logout", userLogout);
 
 export default authRouter;
