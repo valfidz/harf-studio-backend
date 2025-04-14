@@ -124,14 +124,6 @@ export const userLogin = async (req: Request, res: Response): Promise<any> => {
     // check session on redis
     const session = await redis.get<Session>(`user_session:${encryptMail}`);
     let token;
-    // let userData: {
-    //   id: string;
-    //   name: string;
-    //   company_name: string;
-    //   email: string;
-    //   role: string;
-    //   method: string;
-    // } | null = null;
 
     let userData;
 
