@@ -3,6 +3,8 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import authRouter from "./routes/authRoutes";
 import secureRouter from "./routes/encryptionRoutes";
+import midtransRouter from "./routes/subscriptionRoutes";
+import snapRouter from "./routes/snapRoutes";
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -22,5 +24,11 @@ app.use(express.json());
 
 app.use("/auth", authRouter);
 app.use("/secure", secureRouter);
+app.use("/subscriptions", midtransRouter);
+app.use("/snap", snapRouter);
+
+app.get("/checkhealth", (req, res) => {
+  res.send("Backend Harf Studio 1.0 OK");
+});
 
 export default app;
