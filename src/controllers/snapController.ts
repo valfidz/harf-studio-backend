@@ -108,6 +108,9 @@ export const createSnapToken = async (req: Request, res: Response): Promise<any>
         }
 
         const auth = Buffer.from(`${midtransConfig.serverKey}:`).toString("base64");
+        console.log("Base url: ", baseUrl);
+        console.log("Request data: ", snapRequest);
+        console.log("Authorization: ", auth);
 
         const response = await axios.post(
             baseUrl, 
@@ -120,6 +123,13 @@ export const createSnapToken = async (req: Request, res: Response): Promise<any>
               }
             }
           );
+        
+        if (!response) {
+            return res.status(400).json({
+                status: "error",
+                message: "Something's wrong with the request",
+            });
+        }
 
         if (response) {
             console.log("Transaction created successfully: ", response.data);
