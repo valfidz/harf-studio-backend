@@ -12,8 +12,8 @@ dotenv.config();
 const app = express();
 
 const allowedOrigins = [
-  process.env.FRONTEND_URL,
-  process.env.BACKEND_URL,
+  process.env.FRONTEND_URL || "https://harp-studio.vercel.app",
+  process.env.BACKEND_URL || "https://harf-studio-backend.onrender.com",
   'http://localhost:3000'
 ];
 
