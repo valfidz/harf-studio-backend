@@ -31,16 +31,20 @@ app.use((req, res, next) => {
 app.use(
   cors({
     origin: function(origin, callback) {
-      // Allow requests with no origin (like Postman)
-      if (!origin) {
-        return callback(null, true);
-      }
+      // Allow requests with no origin (like Postman, server-to-server)
+      if (!origin) return callback(null, true);
 
-      if (allowedOrigins.indexOf(origin) !== -1) {
+      // Check if origin matches any allowed origin (string or RegExp)
+      const isAllowed = allowedOrigins.some(o =>
+        typeof o === 'string' ? o === origin : o.test(origin)
+      );
+
+      if (isAllowed) {
         callback(null, true);
       } else {
         console.log('Blocked origin:', origin);
-        callback(new Error('Not allowed by CORS'));
+        // Instead of throwing, just deny with no CORS headers
+        callback(new Error('Not allowed by CORS'), false);
       }
     },
     credentials: true,
