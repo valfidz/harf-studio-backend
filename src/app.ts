@@ -14,12 +14,15 @@ const app = express();
 const allowedOrigins = [
   process.env.FRONTEND_URL || "https://harp-studio.vercel.app",
   process.env.BACKEND_URL || "https://harf-studio-backend.onrender.com",
-  'http://localhost:3000'
+  'http://localhost:3000',
+  /\.cloudflare\.com$/,
+  /\.render\.com$/
 ];
 
 // Add request logging middleware
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  console.log('Real IP:', req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.ip);
   console.log('Headers:', JSON.stringify(req.headers, null, 2));
   next();
 });
@@ -33,7 +36,7 @@ app.use(
         return callback(null, true);
       }
 
-      if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV !== 'production') {
+      if (allowedOrigins.indexOf(origin) !== -1) {
         callback(null, true);
       } else {
         console.log('Blocked origin:', origin);
@@ -50,13 +53,20 @@ app.use(
       'Origin',
       'Access-Control-Allow-Headers',
       'Access-Control-Request-Method',
-      'Access-Control-Request-Headers'
+      'Access-Control-Request-Headers',
+      'CF-Connecting-IP',
+      'CF-IPCountry',
+      'CF-RAY',
+      'True-Client-IP'
     ],
     exposedHeaders: ['Set-Cookie', 'Authorization'],
     preflightContinue: false,
     optionsSuccessStatus: 204
   })
 );
+
+// Trust proxy settings for Cloudflare and Render
+app.set('trust proxy', true);
 
 // Add error handling middleware
 app.use((err: any, req: any, res: any, next: any) => {
