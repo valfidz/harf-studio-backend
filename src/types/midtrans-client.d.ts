@@ -37,19 +37,19 @@ export interface MidtransConfig {
       authentication?: boolean;
     };
     customer_details?: CustomerDetails;
-    item_details?: Array<{
+    item_details?: {
       id: string;
       price: number;
       quantity: number;
       name: string;
-    }>;
+    };
     callbacks?: {
       finish?: string;
     };
     user_id: string;
     recurring?: {
       required: boolean;
-      start_time: string;
+      start_time?: string;
       interval_unit: string;
       max_interval?: number;
     }
@@ -65,7 +65,7 @@ export interface MidtransConfig {
       interval: number;
       interval_unit: string;
       max_interval?: number;
-      start_time: string;
+      start_time?: string;
     };
     retry_schedule?: {
       interval: number;
