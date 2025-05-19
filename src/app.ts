@@ -5,6 +5,7 @@ import authRouter from "./routes/authRoutes";
 import secureRouter from "./routes/encryptionRoutes";
 import midtransRouter from "./routes/subscriptionRoutes";
 import snapRouter from "./routes/snapRoutes";
+import planRouter from "./routes/planRoutes";
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -37,6 +38,7 @@ app.use("/auth", authRouter);
 app.use("/secure", secureRouter);
 app.use("/subscriptions", midtransRouter);
 app.use("/snap", snapRouter);
+app.use("/plans", planRouter);
 
 app.get("/checkhealth", (req, res) => {
   res.send("Backend Harf Studio 1.0 OK");
