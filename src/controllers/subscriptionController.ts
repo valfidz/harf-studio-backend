@@ -1,4 +1,6 @@
 import { Request, Response } from "express";
+import { AuthRequest } from "../types/req";
+import { UserPayload } from "../types/user";
 import axios from "axios";
 import midtransConfig from "../config/midtrans";
 import { CardDetails, CustomerDetails, SubscriptionRequest } from "../types/midtrans-client";
@@ -44,15 +46,22 @@ export const getCardToken = async (req: Request, res: Response): Promise<any> =>
 export const createSubscription = async (req: Request, res: Response): Promise<any> => {
     try {
         const { 
-            name,
             amount,
             currency,
             payment_type,
             saved_token_id,
-            customer_details,
             metadata
         } = req.body;
         const interval = process.env.SUBS_INTERVAL || "month";
+        const user_id = metadata.user_id;
+
+        // Get name from user_id
+        const get_user = await sql`SELECT name, email FROM users WHERE id = ${user_id}`;
+        const name = get_user[0].name;
+        const customer_details = {
+            first_name: name,
+            email: get_user[0].email,
+        }
 
         const now = new Date();
         const formattedDate = now.toLocaleString('en-US', {
@@ -164,6 +173,37 @@ export const getSubscription = async (req: Request, res: Response): Promise<any>
     }
 }
 
+// Get Subscription from database
+export const getDBSubscription = async (req: AuthRequest, res: Response): Promise<any> => {
+    try {
+        const { id } = req.params;
+        const user = req.user as UserPayload;
+        const user_id = user?.id;
+
+        const subscription = await sql`
+            SELECT * FROM subscriptions
+            WHERE md_subscription_id = ${id}
+            AND user_id = ${user_id}
+            AND deleted_at IS NULL`;
+
+        if (subscription.length === 0) {
+            return res.status(404).json({ 
+                status: "error",
+                message: "Subscription not found",
+             });
+        }
+
+        return res.status(200).json(subscription[0]);
+    } catch (error: any) {
+        console.error("Error getting subscription: ", error.message);
+        return res.status(500).json({ 
+            status: "error",
+            message: "Failed to get subscription",
+            error: error.message,
+         });
+    }
+}
+
 // Disable Subscription
 export const disableSubscription = async (req: Request, res: Response): Promise<any> => {
     try {
@@ -235,7 +275,7 @@ export const enableSubscription = async (req: Request, res: Response): Promise<a
 export const handleSubscriptionNotification = async (req: Request, res: Response): Promise<any> => {
     try {
         const notification = req.body;
-        // let trx_id;
+        let subs_data;
       
         // Log the notification
         console.log('Subscription notification:', JSON.stringify(notification, null, 2));
@@ -243,31 +283,8 @@ export const handleSubscriptionNotification = async (req: Request, res: Response
         
         // Process based on subscription status
         const subscriptionId = notification.subscription.id;
-        // const new_trx_id = uuidv4();
         const status = notification.subscription.status;
-        // const transaction_id = notification.transaction?.transaction_id || null;
         let transaction_id;
-
-        if (notification.event_name === "subscription.create") {
-            transaction_id = notification.subscription.metadata.pg_trx_id;
-        }
-
-        if (notification.event_name === "subscription.charge") {
-            transaction_id = notification.transaction.transaction_id;
-        }
-
-
-        // if (!transaction_id) {
-        //     transaction_id = `${Date.now()}-${uuidv4().substring(0, 8)}`;
-        // }
-
-        // if (!transaction_id) {
-        //     trx_id = new_trx_id;
-        // } else {
-        //     trx_id = transaction_id;
-        // }
-
-        console.log("transaction id: ", transaction_id);
 
         const name = notification.subscription.name;
         const amount = notification.subscription.amount;
@@ -275,35 +292,79 @@ export const handleSubscriptionNotification = async (req: Request, res: Response
         const start_time = notification.subscription.schedule.start_time;
         const next_charge = notification.subscription.schedule.next_execution_at;
         const token = notification.subscription.token;
-        // const email = notification.subscription.customer_details.email;
         const user_id = notification.subscription.metadata.user_id;
         const plan_id = notification.subscription.metadata.plan_id;
+
+        // Create query for create new subscription
+        if (notification.event_name === "subscription.create") {
+            transaction_id = notification.subscription.metadata.pg_trx_id;
+            const save_subs = await sql`INSERT INTO subscriptions (
+                    amount,
+                    status,
+                    start_time,
+                    token,
+                    user_id,
+                    md_subscription_id,
+                    next_charge,
+                    plan_id
+                )
+                VALUES (
+                    ${amount},
+                    ${status},
+                    ${start_time},
+                    ${token},
+                    ${user_id},
+                    ${subscriptionId},
+                    ${next_charge},
+                    ${plan_id}
+                )
+                RETURNING id, amount, status, start_time, token, user_id, md_subscription_id, next_charge, plan_id
+            `
+
+            subs_data = save_subs[0];
+        }
+
+        // Create query for update subscription after recharge
+        if (notification.event_name === "subscription.charge") {
+            transaction_id = notification.transaction.transaction_id;
+            const save_subs = await sql`UPDATE subscriptions SET status = ${status}, next_charge = ${next_charge}, updated_at = NOW()
+                WHERE md_subscription_id = ${subscriptionId}
+                AND user_id = ${user_id}
+                RETURNING id, amount, status, start_time, token, user_id, md_subscription_id, next_charge, plan_id`
+            subs_data = save_subs[0];
+        }
+
+        console.log("transaction id: ", transaction_id);
+        console.log("Subscription data: ", subs_data);
         
         // TODO: Update your database with subscription status
 
-        // Create query for create new subscription
+        if (!subs_data) {
+            return res.status(400).json({ 
+                status: "error",
+                message: "Failed to save subscription data",
+            });
+        }
+        const db_subs_id = subs_data.id;
 
-        // Create query for update subscription after recharge
+        // Check if the transaction is already exists
+        const exist_trx = await sql`SELECT pg_trx_id FROM subscription_histories WHERE pg_trx_id = ${transaction_id}`;
 
-        // Add subscription
-        const save_subs = await sql`
-            INSERT INTO subscriptions (amount, status, start_time, token, user_id, md_subscription_id, next_charge, plan_id)
-            VALUES (${amount}, ${status}, ${start_time}, ${token}, ${user_id}, ${subscriptionId}, ${next_charge}, ${plan_id})
-            RETURNING id, amount, status, start_time, token, user_id, md_subscription_id, next_charge, plan_id
-        `
-
-        // console.log("Subscription: ", save_subs[0]);
-
-        const db_subs_id = save_subs[0].id;
+        if (exist_trx.length > 0) {
+            return res.status(200).json({
+                status: 'ok',
+                message: 'Transaction exists in the database',
+            });
+        }
 
         // Add subscription history
         const subs_history = await sql`
-            INSERT INTO subscription_histories (pg_trx_id, subscription_id, status)
-            VALUES (${transaction_id}, ${db_subs_id}, ${status})
-            RETURNING id, pg_trx_id, subscription_id, status
+            INSERT INTO subscription_histories (pg_trx_id, subscription_id)
+            VALUES (${transaction_id}, ${db_subs_id})
+            RETURNING id, pg_trx_id, subscription_id
         `
 
-        // console.log("Subscription history: ", subs_history[0]);
+        console.log("Subscription history: ", subs_history[0]);
         
         return res.status(200).json({ status: 'ok' });
     } catch (error: any) {

@@ -1,7 +1,7 @@
 import "express";
 export interface User {
-    name: string,
-    company_name: string | null,
+    name: string;
+    company_name: string | null;
     email: string;
     password: string;
     role: "admin" | "member";

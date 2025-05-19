@@ -130,7 +130,7 @@ export const userLogin = async (req: Request, res: Response): Promise<any> => {
     if (!session) {
       // get user data from database
       const user = await sql`
-                  SELECT id, name, company_name, email, role, password
+                  SELECT id, name, company_name, email, role, password, method
                   FROM users
                   WHERE email = ${email} 
                   AND deleted_at IS NULL

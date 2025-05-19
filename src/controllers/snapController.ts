@@ -5,6 +5,8 @@ import midtransConfig from "../config/midtrans";
 import { SnapRequest } from "../types/midtrans-client";
 import { redis } from "../config/redis";
 import { encryptKey } from "../utils/encrypt";
+import { Session } from "../types/token";
+import { generateJWToken, verifyToken } from "../utils/jwt";
 import sql from "../config/database";
 import dotenv from "dotenv";
 import { stat } from "fs";
@@ -14,7 +16,7 @@ import { paymentNotificationLogger, snapTokenLogger } from "../config/logger";
 
 dotenv.config();
 
-export const createSnapToken = async (req: Request, res: Response): Promise<any> => {
+export const createSnapPayment = async (req: Request, res: Response): Promise<any> => {
     try {
         const {
             customer_details,
@@ -30,6 +32,20 @@ export const createSnapToken = async (req: Request, res: Response): Promise<any>
             return res.status(400).json({
                 status: "error",
                 message: "Invalid quantity",
+            })
+        }
+
+        // Check if user has active subscription
+        const hasActiveSubs = await sql`
+            SELECT md_subscription_id FROM subscriptions
+            WHERE user_id = ${user_id}
+            AND status = 'active'
+            AND deleted_at IS NULL`
+
+        if (hasActiveSubs.length > 0) {
+            return res.status(400).json({
+                status: "error",
+                message: "User already has an active subscription",
             })
         }
 
@@ -208,13 +224,6 @@ export const handleNotification = async (req: Request, res: Response): Promise<a
         const encryptUserId = await encryptKey(user_id);
         const redis_subs_request: any = await redis.get(`subsRequest:${encryptUserId}`);
 
-        if (!redis_subs_request) {
-            return res.status(400).json({
-                status: "error",
-                message: "Failed to get request data from redis",
-            })
-        }
-
         // Check if saved_token_id is exist in database
         if (!savedTokenId) {
             const savedToken = await sql`
@@ -250,28 +259,7 @@ export const handleNotification = async (req: Request, res: Response): Promise<a
 
         // console.log('Received notification:', JSON.stringify(notification, null, 2));
 
-        const check_order = !orderId.startsWith("ORDER-");
-
-        // if (!check_order) {
-        //     console.log("check 1");
-        //     const plan_id = notification.metadata.plan_id;
-        //     const quantity = 1;
-        //     const create_transaction = await sql`
-        //         INSERT INTO transaction_histories (order_id, plan_id, quantity, user_id)
-        //         VALUES (${orderId}, ${plan_id}, ${quantity}, ${user_id})
-        //         RETURNING id, order_id, plan_id, quantity, user_id
-        //     `
-
-        //     if (!create_transaction) {
-        //         return res.status(400).json({
-        //             status: "error",
-        //             message: "Failed to save transaction",
-        //         });
-        //     } else {
-        //         // console.log("Transaction saved successfully!", create_transaction[0]);
-        //         console.log("Transaction saved successfully!");
-        //     }
-        // }
+        // Save payment information to database
 
         save_payment = await sql`
             INSERT INTO payment_histories (order_id, transaction_status, fraud_status, gross_amount, pg_trx_id, user_id)
@@ -289,16 +277,16 @@ export const handleNotification = async (req: Request, res: Response): Promise<a
 
         // Data object for create subscription
         const reqData = {
-            name: redis_subs_request.name,
-            amount: redis_subs_request.amount,
-            customer_details: redis_subs_request.customer_details,
+            // name: redis_subs_request.name,
+            amount: parseInt(gross_amount),
+            // customer_details: redis_subs_request.customer_details,
             payment_type,
             saved_token_id: savedTokenId,
             metadata: {
-                description: redis_subs_request.metadata.description,
-                user_id: redis_subs_request.user_id,
-                plan_id: redis_subs_request.plan_id,
-                order_id: redis_subs_request.order_id,
+                description: redis_subs_request.metadata.description ? redis_subs_request.metadata.description : notification.metadata.description,
+                user_id: user_id,
+                plan_id: redis_subs_request.plan_id ? redis_subs_request.plan_id : notification.metadata.plan_id,
+                order_id: orderId,
                 pg_trx_id: pg_trx_id,
             },
         }
@@ -317,21 +305,108 @@ export const handleNotification = async (req: Request, res: Response): Promise<a
                 if (savedTokenId && reqData) {
                     console.log(`Transaction ${orderId} is successful with saved token: ${savedTokenId}`);
                     try {
-                        // Call subscription creation endpoint
-                        const response = await axios.post(
-                            `${process.env.BASE_URL}/subscriptions/create`,
-                            reqData,
-                            {
-                                headers: {
-                                    'Content-Type': 'application/json',
-                                    'Accept': 'application/json',
+                        // if subscription_id is not exist, create subscription by hitting subscription creation endpoint
+                        if (!subscription_id) {
+                            let token;
+                            let userData;
+                            // Get email from database
+                            const user_data = await sql`
+                                SELECT id, name, company_name, email, role, method
+                                FROM users
+                                WHERE id = ${user_id}
+                                AND deleted_at IS NULL
+                            `
+                            const encryptMail = await encryptKey(user_data[0].email);
+
+                            // Check if authorization token is exist in redis
+                            const session = await redis.get<Session>(`user_session:${encryptMail}`);
+
+                            // If there is no token, create a new one and save it to redis
+                            if (!session) {
+                                if (user_data.length === 0) {
+                                    return res.status(404).json({
+                                    error: "User not found!",
+                                    });
+                                }
+
+                                userData = {
+                                    id: user_data[0].id,
+                                    name: user_data[0].name,
+                                    company_name: user_data[0].company_name,
+                                    email: user_data[0].email,
+                                    role: user_data[0].role,
+                                    method: user_data[0].method
+                                }
+
+                                const generateToken = generateJWToken(userData);
+                                await redis.set(`user_session:${encryptMail}`, { token: generateToken }, { ex: 86400 });
+                                if (
+                                    typeof generateToken === "object" &&
+                                    "errorCode" in generateToken &&
+                                    (generateToken.errorCode === "13" || generateToken.errorCode === "14")
+                                ) {
+                                    return res.status(400).json({
+                                    errorCode: generateToken.errorCode,
+                                    message: generateToken.message,
+                                    });
+                                }
+
+                                token = generateToken;
+                            } else {
+                                token = session.token;
+
+                                if (!token) {
+                                    return res.status(500).json({
+                                    error: "Token invalid"
+                                    })
+                                }
+
+                                const validate = verifyToken(token);
+
+                                if (!validate.valid) {
+                                    return res.status(500).json({
+                                    valid: validate.valid,
+                                    error: validate.error,
+                                    });
+                                }
+
+                                userData = {
+                                    id: validate.decoded?.id,
+                                    name: validate.decoded?.name,
+                                    company_name: validate.decoded?.company_name,
+                                    email: validate.decoded?.email,
+                                    role: validate.decoded?.role,
+                                    method: validate.decoded?.method
                                 }
                             }
-                        );
+
+                            res.cookie("token", token, {
+                            httpOnly: true,
+                            secure: process.env.NODE_ENV === "production",
+                            sameSite: "strict",
+                            maxAge: 24 * 60 * 60 * 1000,
+                            });
+
+                            res.setHeader("Authorization", `Bearer ${token}`);
+
+                            // Call subscription creation endpoint
+                            const response = await axios.post(
+                                `${process.env.BASE_URL}/subscriptions/create`,
+                                reqData,
+                                {
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                        'Accept': 'application/json',
+                                        'Authorization': `Bearer ${token}`
+                                    }
+                                }
+                            );
+                            console.log("Subscription created successfully: ", response.data);
+                        }
+                        
 
                         status = "Success";
                         message = "Transaction is successful";
-                        console.log("Subscription created successfully: ", response.data);
                     } catch (error: any) {
                         status = "Failed";
                         message = "Failed to create subscription";
